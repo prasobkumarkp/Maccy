@@ -1,5 +1,4 @@
-"search_placeholder" = "tipkaj za pretragu …";
-"history_item_tooltip" = "Izbriši pomoću tipki ⌥⌫.\nPrikvači/otkvači pomoću tipki ⌥P.";
+"search_placeholder" = "tipkaj za pretragu...";
 "clear_tooltip" = "Izbriši neprikvačene.\nIzbriši sve pomoću tipke ⇧.";
 "clear_all_tooltip" = "Izbriši sve.";
 "about_tooltip" = "Saznaj više o programu.";
@@ -15,14 +14,11 @@
 "preferences_general" = "Opće";
 "preferences_pins" = "Pribadače";
 "preferences_storage" = "Skladištenje";
-"first_copy_time_tooltip" = "Vrijeme prve kopije";
-"last_copy_time_tooltip" = "Vrijeme zadnje kopije";
-"number_of_copies_tooltip" = "Broj kopija";
 "copy_modifiers_config" = "• Za kopiranje elementa odaberi zajedno s pritisnutom tipkom %@.";
 "paste_modifiers_config" = "• Za kopiranje i umetanje elementa odaberi zajedno s pritisnutom tipkom %@.";
 "format_modifiers_config" = "• Za kopiranje, uklanjanje formata i umetanje elementa odaberi zajedno s pritisnutom tipkom %@.";
 "accessibility_alert_message" = "„Maccy” želi upravljati ovim računalom koristeći funkcije pristupačnosti.";
-"accessibility_alert_comment" = "Dozvoli pristup ovom programu u postavkama za sigurnost i privatnost u postavkama sustava.";
+"accessibility_alert_comment" = "Dozvoli pristup ovoj aplikaciji u postavkama {pane} unutar {settings}.\n\nKliknite gumb „+”, odaberite „Maccy” i uključite potvrdni okvir pokraj njega.";
 "accessibility_alert_deny" = "Zabrani";
 "accessibility_alert_open" = "Otvori postavke sustava";
 "clear_alert_message" = "Stvarno želiš izbrisati povijest?";
@@ -30,3 +26,9 @@
 "clear_alert_cancel" = "Odustani";
 "clear_alert_confirm" = "Izbriši";
 "key_used_error" = "Tipka se već koristi.";
+"active_screen" = "Aktivni ekran";
+"screen" = "Ekran";
+"system_settings_name" = "Postavki sustava";
+"system_settings_pane" = "Privatnost i sigurnost";
+"system_preferences_name" = "Postavki sustava";
+"system_preferences_pane" = "Sigurnost i privatnost";

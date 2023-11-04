@@ -1,6 +1,5 @@
 "search_placeholder" = "tapez pour rechercher...";
-"history_item_tooltip" = "Appuyez sur ⌥⌫ pour supprimer.\nAppuyez sur ⌥P pour épingler.";
-"clear_tooltip" = "Supprimer les éléments non épinglés.\nSélectionnez avec ⌥ pour tout supprimer.";
+"clear_tooltip" = "Supprimer les éléments non épinglés.\nSélectionnez avec ⇧ pour tout supprimer.";
 "clear_all_tooltip" = "Supprimer toute la liste.";
 "about_tooltip" = "Plus d'informations à propos de l'application.";
 "quit_tooltip" = "Quitter l'application.";
@@ -15,14 +14,11 @@
 "preferences_general" = "Général";
 "preferences_pins" = "Épingles";
 "preferences_storage" = "Stockage";
-"first_copy_time_tooltip" = "Date de la première copie";
-"last_copy_time_tooltip" = "Date de la dernière copie";
-"number_of_copies_tooltip" = "Nombre de copies";
 "copy_modifiers_config" = "• Selectionnez avec %@ pressé pour copier un élément.";
 "paste_modifiers_config" = "• Selectionnez avec %@ pressé pour copier et coller l'élément.";
 "format_modifiers_config" = "• Selectionnez avec %@ pressé pour copier, reformater et coller l'élément.";
 "accessibility_alert_message" = "“Maccy” souhaite contrôler cet ordinateur en utilisant des fonctions d'accessibilité.";
-"accessibility_alert_comment" = "Accorder les droits à cette application dans le panneau Sécurité & confidentialité, situé dans Préférences Système.";
+"accessibility_alert_comment" = "Accorder les droits à cette application dans le panneau {pane}, situé dans {settings}.\n\nCliquez sur le bouton +, sélectionnez “Maccy“ et cochez la case à côté.";
 "accessibility_alert_deny" = "Refuser";
 "accessibility_alert_open" = "Ouvrir les Préférences Système";
 "clear_alert_message" = "Voulez-vous vraiment effacer l'historique?";
@@ -30,3 +26,9 @@
 "clear_alert_cancel" = "Annuler";
 "clear_alert_confirm" = "Supprimer";
 "key_used_error" = "La clé est déjà utilisée.";
+"active_screen" = "Écran actif";
+"screen" = "Écran";
+"system_settings_name" = "Réglages Système";
+"system_settings_pane" = "Confidentialité et sécurité";
+"system_preferences_name" = "Préférences Système";
+"system_preferences_pane" = "Sécurité & confidentialité";

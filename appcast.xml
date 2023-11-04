@@ -6,24 +6,27 @@
     <description>Most recent changes with links to updates.</description>
     <language>en</language>
     <item>
-      <title>0.22.2</title>
+      <title>0.28.0</title>
       <description>
         <![CDATA[
           <ul>
-            <li>Improved the header and search field horizontal padding on macOS 11+.</li>
-            <li>Fixed an issue when the search field would select all the entered text upon finding no results.</li>
-            <li>Moved storage preferences to a separate tab.</li>
-            <li>Fixed pasting the wrong item on the App Store version of Microsoft Word.</li>
+            <li>Added support for ignoring text copies based on regular expressions.</li>
+            <li>Fixed an issue when copying anything in Microsoft Word would create an in-app bookmark.</li>
+            <li>Fixed a slow search on macOS Sonoma.</li>
+            <li>Fixed a preview position on macOS Sonoma.</li>
+            <li>Fixed a popup position on macOS Sonoma.</li>
+            <li>Fixed a selection of pins with a "v" letter assigned.</li>
+            <li>Fixed a preferences window not being focused on macOS Sonoma.</li>
           </ul>
         ]]>
       </description>
-      <pubDate>2022-02-11</pubDate>
-      <releaseNotesLink>https://github.com/p0deje/Maccy/releases/tag/0.22.2</releaseNotesLink>
+      <pubDate>2023-10-20</pubDate>
+      <releaseNotesLink>https://github.com/p0deje/Maccy/releases/tag/0.28.0</releaseNotesLink>
       <sparkle:minimumSystemVersion>10.14</sparkle:minimumSystemVersion>
       <enclosure
-        url="https://github.com/p0deje/Maccy/releases/download/0.22.2/Maccy.app.zip"
-        sparkle:version="11"
-        sparkle:shortVersionString="0.22.2"
+        url="https://github.com/p0deje/Maccy/releases/download/0.28.0/Maccy.app.zip"
+        sparkle:version="23"
+        sparkle:shortVersionString="0.28.0"
         length="0"
         type="application/octet-stream"
       />

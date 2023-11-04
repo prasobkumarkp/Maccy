@@ -4,21 +4,29 @@ import AppKit
 // Custom menu supporting "search-as-you-type" based on https://github.com/mikekazakov/MGKMenuWithFilter.
 // swiftlint:disable type_body_length
 class Menu: NSMenu, NSMenuDelegate {
+  static let menuWidth = 300
+  static let popoverGap = 5.0
+
   class IndexedItem: NSObject {
     var value: String
-    var title: String { item.title }
+    var title: String { item.title ?? "" }
     var item: HistoryItem!
     var menuItems: [HistoryMenuItem]
+    var popoverAnchor: NSMenuItem?
 
     init(value: String, item: HistoryItem?, menuItems: [HistoryMenuItem]) {
       self.value = value
       self.item = item
       self.menuItems = menuItems
+      if #unavailable(macOS 14) {
+        self.popoverAnchor = HistoryMenuItem.PreviewMenuItem()
+      }
     }
   }
 
   public let maxHotKey = 9
-  public let menuWidth = 300
+
+  public var isVisible: Bool = false
 
   public var firstUnpinnedHistoryMenuItem: HistoryMenuItem? {
     historyMenuItems.first(where: { !$0.isPinned })
@@ -33,8 +41,14 @@ class Menu: NSMenu, NSMenuDelegate {
 
   private let search = Search()
 
+  private static let subsequentPreviewDelay = 0.2
+  private var initialPreviewDelay: Double { Double(UserDefaults.standard.previewDelay) / 1000 }
+  private lazy var previewThrottle = Throttler(minimumDelay: initialPreviewDelay)
+  private var previewPopover: NSPopover?
+
   private let historyMenuItemOffset = 1 // The first item is reserved for header.
   private let historyMenuItemsGroup = 3 // 1 main and 2 alternates
+  private var previewMenuItemOffset = 0
 
   private var clipboard: Clipboard!
   private var history: History!
@@ -55,46 +69,178 @@ class Menu: NSMenu, NSMenuDelegate {
 
   private var maxMenuItems: Int { UserDefaults.standard.maxMenuItems }
   private var maxVisibleItems: Int { maxMenuItems * historyMenuItemsGroup }
+  private var lastMenuLocation: PopupLocation?
+  private var menuHeader: MenuHeaderView? { items.first?.view as? MenuHeaderView }
+  private var menuWindow: NSWindow? { NSApp.menuWindow }
 
   required init(coder decoder: NSCoder) {
     super.init(coder: decoder)
   }
 
   init(history: History, clipboard: Clipboard) {
-    UserDefaults.standard.register(defaults: [
-      UserDefaults.Keys.maxMenuItems: UserDefaults.Values.maxMenuItems
-    ])
-
     super.init(title: "Maccy")
 
     self.history = history
     self.clipboard = clipboard
     self.delegate = self
-    self.minimumWidth = CGFloat(menuWidth)
+    self.minimumWidth = CGFloat(Menu.menuWidth)
+
+    if #unavailable(macOS 14) {
+      self.previewMenuItemOffset = 1
+    }
+  }
+
+  func popUpMenu(at location: NSPoint, ofType locationType: PopupLocation) {
+    prepareForPopup(location: locationType)
+    super.popUp(positioning: nil, at: location, in: nil)
+  }
+
+  func prepareForPopup(location: PopupLocation) {
+    lastMenuLocation = location
+    updateUnpinnedItemsVisibility()
+    setKeyEquivalents(historyMenuItems)
   }
 
   func menuWillOpen(_ menu: NSMenu) {
-    updateUnpinnedItemsVisibility()
-    setKeyEquivalents(historyMenuItems)
+    isVisible = true
+    previewThrottle.minimumDelay = initialPreviewDelay
     highlight(firstVisibleUnpinnedHistoryMenuItem ?? historyMenuItems.first)
+  }
+
+  internal func adjustMenuWindowPosition() {
+    guard let location = lastMenuLocation else {
+      return
+    }
+    if let point = location.location(for: self.size) {
+      menuWindow?.setFrameTopLeftPoint(point)
+    }
+  }
+
+  func menuDidClose(_ menu: NSMenu) {
+    isVisible = false
+    lastMenuLocation = nil
+    offloadCurrentPreview()
+  }
+
+  func menu(_ menu: NSMenu, willHighlight item: NSMenuItem?) {
+    offloadCurrentPreview()
+
+    guard let item = item as? HistoryMenuItem else {
+      return
+    }
+
+    previewThrottle.throttle { [self] in
+      previewPopover = NSPopover()
+      previewPopover?.animates = false
+      previewPopover?.behavior = .semitransient
+      previewPopover?.contentViewController = Preview(item: item.item)
+
+      guard let previewWindow = menuWindow,
+            let windowContentView = previewWindow.contentView,
+            let boundsOfVisibleMenuItem = boundsOfMenuItem(item, windowContentView) else {
+        return
+      }
+
+      previewThrottle.minimumDelay = Menu.subsequentPreviewDelay
+
+      previewPopover?.show(
+        relativeTo: boundsOfVisibleMenuItem,
+        of: windowContentView,
+        preferredEdge: .maxX
+      )
+
+      if let popoverWindow = previewPopover?.contentViewController?.view.window {
+        if popoverWindow.frame.minX < previewWindow.frame.minX {
+          popoverWindow.setFrameOrigin(
+            NSPoint(x: popoverWindow.frame.minX - Menu.popoverGap, y: popoverWindow.frame.minY)
+          )
+        } else {
+          popoverWindow.setFrameOrigin(
+            NSPoint(x: popoverWindow.frame.minX + Menu.popoverGap, y: popoverWindow.frame.minY)
+          )
+        }
+      }
+    }
+  }
+
+  private func boundsOfMenuItem(_ item: NSMenuItem, _ windowContentView: NSView) -> NSRect? {
+    if #available(macOS 14, *) {
+      let windowRectInScreenCoordinates = windowContentView.accessibilityFrame()
+      let menuItemRectInScreenCoordinates = item.accessibilityFrame()
+      return NSRect(
+        origin: NSPoint(
+          x: menuItemRectInScreenCoordinates.origin.x - windowRectInScreenCoordinates.origin.x,
+          y: menuItemRectInScreenCoordinates.origin.y - windowRectInScreenCoordinates.origin.y),
+        size: menuItemRectInScreenCoordinates.size
+      )
+    } else {
+      guard let item = item as? HistoryMenuItem,
+            let itemIndex = indexedItems.firstIndex(where: { $0.menuItems.contains(item) }) else {
+        return nil
+      }
+      let indexedItem = indexedItems[itemIndex]
+      guard let previewView = indexedItem.popoverAnchor!.view else {
+        return nil
+      }
+
+      func getPrecedingView() -> NSView? {
+        for index in (0..<itemIndex).reversed() {
+          // PreviewMenuItem always has a view
+          // Check if preview item is visible (it may be hidden by the search filter)
+          if let view = indexedItems[index].popoverAnchor?.view,
+             view.window != nil {
+            return view
+          }
+        }
+        // If the item is the first visible one, the preceding view is the header.
+        guard let header = menuHeader else {
+          // Should never happen as we always have a MenuHeader installed.
+          return nil
+        }
+        return header
+      }
+
+      guard let precedingView = getPrecedingView() else {
+        return nil
+      }
+
+      let bottomPoint = previewView.convert(
+        NSPoint(x: previewView.bounds.minX, y: previewView.bounds.maxY),
+        to: windowContentView
+      )
+      let topPoint = precedingView.convert(
+        NSPoint(x: previewView.bounds.minX, y: precedingView.bounds.minY),
+        to: windowContentView
+      )
+
+      let heightOfVisibleMenuItem = abs(topPoint.y - bottomPoint.y)
+      return NSRect(
+        origin: bottomPoint,
+        size: NSSize(width: item.menu?.size.width ?? 0, height: heightOfVisibleMenuItem)
+      )
+    }
   }
 
   func buildItems() {
     clearAll()
 
-    for item in Sorter(by: UserDefaults.standard.sortBy).sort(history.all) {
+    for item in history.all {
       let menuItems = buildMenuItems(item)
       if let menuItem = menuItems.first {
-        indexedItems.append(IndexedItem(value: menuItem.value,
-                                        item: item,
-                                        menuItems: menuItems))
-        menuItems.forEach(addItem(_:))
+        let indexedItem = IndexedItem(
+          value: menuItem.value,
+          item: item,
+          menuItems: menuItems
+        )
+        indexedItems.append(indexedItem)
+        menuItems.forEach(safeAddItem)
+        addPopoverAnchor(indexedItem)
       }
     }
   }
 
   func add(_ item: HistoryItem) {
-    let sortedItems = Sorter(by: UserDefaults.standard.sortBy).sort(history.all)
+    let sortedItems = history.all
     guard let insertionIndex = sortedItems.firstIndex(where: { $0 == item }) else {
       return
     }
@@ -103,40 +249,47 @@ class Menu: NSMenu, NSMenuDelegate {
     guard let menuItem = menuItems.first else {
       return
     }
-    indexedItems.insert(IndexedItem(value: menuItem.value,
-                                    item: item,
-                                    menuItems: menuItems),
-                        at: insertionIndex)
+    let indexedItem = IndexedItem(
+      value: menuItem.value,
+      item: item,
+      menuItems: menuItems
+    )
+    indexedItems.insert(indexedItem, at: insertionIndex)
 
-    var menuItemInsertionIndex = insertionIndex
-    // Keep pins on the same place.
-    if item.pin != nil {
-      if let index = historyMenuItems.firstIndex(where: { item.supersedes($0.item) }) {
-        menuItemInsertionIndex = index
+    ensureInEventTrackingModeIfVisible {
+      var menuItemInsertionIndex = insertionIndex
+      // Keep pins on the same place.
+      if item.pin != nil {
+        if let index = self.historyMenuItems.firstIndex(where: { item.supersedes($0.item) }) {
+          menuItemInsertionIndex = (index + self.previewMenuItemOffset)
+        }
+      } else {
+        menuItemInsertionIndex *= (self.historyMenuItemsGroup + self.previewMenuItemOffset)
       }
-    } else {
-      menuItemInsertionIndex *= historyMenuItemsGroup
-    }
+      menuItemInsertionIndex += self.historyMenuItemOffset
+      self.insertPopoverAnchor(indexedItem, menuItemInsertionIndex)
 
-    if menuItemInsertionIndex <= historyMenuItems.count {
-      menuItemInsertionIndex += historyMenuItemOffset
       for menuItem in menuItems.reversed() {
-        insertItem(menuItem, at: menuItemInsertionIndex)
+        self.safeInsertItem(menuItem, at: menuItemInsertionIndex)
       }
-    }
 
-    clearRemovedItems()
+      self.clearRemovedItems()
+    }
   }
 
   func clearAll() {
-    clear(indexedItems.flatMap({ $0.menuItems }))
+    clear(indexedItems)
   }
 
   func clearUnpinned() {
-    clear(indexedItems.flatMap({ $0.menuItems }).filter({ !$0.isPinned }))
+    clear(indexedItems.filter({ $0.item.pin == nil }))
   }
 
   func updateFilter(filter: String) {
+    let window = menuWindow
+    var savedTopLeft = window?.frame.origin ?? NSPoint()
+    savedTopLeft.y += window?.frame.height ?? 0.0
+
     var results = search.search(string: filter, within: indexedItems)
 
     // Strip the results that are longer than visible items.
@@ -149,59 +302,81 @@ class Menu: NSMenu, NSMenuDelegate {
 
     // Ensure that pinned items are visible after search is cleared.
     if filter.isEmpty {
-      results.append(contentsOf: indexedItems.filter({ $0.item.pin != nil })
-                                             .map({ Search.SearchResult(score: nil, object: $0, titleMatches: []) }))
+      results.append(
+        contentsOf: indexedItems
+          .filter({ $0.item.pin != nil })
+          .map({ Search.SearchResult(score: nil, object: $0, titleMatches: []) })
+      )
     }
 
     // First, remove items that don't match search.
     for indexedItem in indexedItems {
       if !foundItems.contains(indexedItem) {
-        for menuItem in indexedItem.menuItems where items.contains(menuItem) {
-          removeItem(menuItem)
-        }
+        indexedItem.menuItems.forEach(safeRemoveItem)
       }
+      removePopoverAnchor(indexedItem)
     }
 
     // Second, update order of items to match search results order.
     for result in results.reversed() {
+      if let popoverAnchor = result.object.popoverAnchor {
+        safeRemoveItem(popoverAnchor)
+        safeInsertItem(popoverAnchor, at: historyMenuItemOffset)
+      }
       for menuItem in result.object.menuItems.reversed() {
-        if items.contains(menuItem) {
-          removeItem(menuItem)
-        }
+        safeRemoveItem(menuItem)
         menuItem.highlight(result.titleMatches)
-        insertItem(menuItem, at: historyMenuItemOffset)
+        safeInsertItem(menuItem, at: historyMenuItemOffset)
       }
     }
 
     setKeyEquivalents(historyMenuItems)
     highlight(filter.isEmpty ? firstUnpinnedHistoryMenuItem : historyMenuItems.first)
+
+    ensureInEventTrackingModeIfVisible(dispatchLater: true) {
+      let window = self.menuWindow
+      window?.setFrameTopLeftPoint(savedTopLeft)
+    }
   }
 
-  func select() {
+  func select(_ searchQuery: String) {
     if let item = highlightedItem {
       performActionForItem(at: index(of: item))
-      cancelTracking()
+    } else if !searchQuery.isEmpty && historyMenuItems.isEmpty {
+      clipboard.copy(searchQuery)
+      updateFilter(filter: searchQuery)
+    }
+    cancelTrackingWithoutAnimation()
+  }
+
+  func select(position: Int) -> String? {
+    guard indexedItems.count > position,
+          let item = indexedItems[position].menuItems.first else {
+      return nil
+    }
+
+    performActionForItem(at: index(of: item))
+    return indexedItems[position].value
+  }
+
+  func historyItem(at position: Int) -> HistoryItem? {
+    guard indexedItems.indices.contains(position) else {
+      return nil
+    }
+
+    return indexedItems[position].item
+  }
+
+  func selectPrevious() {
+    if !highlightNext(items.reversed()) {
+      highlight(highlightableItems(items).last) // start from the end after reaching the first item
     }
   }
 
-  func selectPrevious(alt: Bool) {
-    if !highlightNext(items.reversed(), alt: alt) {
-      selectLast(alt: alt) // start from the end after reaching the first item
+  func selectNext() {
+    if !highlightNext(items) {
+      highlight(highlightableItems(items).first) // start from the beginning after reaching the last item
     }
-  }
-
-  func selectNext(alt: Bool) {
-    if !highlightNext(items, alt: alt) {
-      selectFirst(alt: alt) // start from the beginning after reaching the last item
-    }
-  }
-
-  func selectFirst(alt: Bool = false) {
-    highlight(highlightableItems(items, alt: alt).first)
-  }
-
-  func selectLast(alt: Bool = false) {
-    highlight(highlightableItems(items, alt: alt).last)
   }
 
   func delete() {
@@ -212,9 +387,15 @@ class Menu: NSMenu, NSMenuDelegate {
     if let historyItemToRemove = itemToRemove as? HistoryMenuItem {
       let historyItemToRemoveIndex = index(of: historyItemToRemove)
 
-      if let historyItem = indexedItems.first(where: { $0.item == historyItemToRemove.item }) {
-        historyItem.menuItems.forEach(removeItem(_:))
-        if let removeIndex = indexedItems.firstIndex(of: historyItem) {
+      // When deleting mulitple items by holding the removal keys
+      // we sometimes get into a race condition with menu updating indices.
+      // https://github.com/p0deje/Maccy/issues/628
+      guard historyItemToRemoveIndex != -1 else { return }
+
+      if let indexedItem = indexedItems.first(where: { $0.item == historyItemToRemove.item }) {
+        removePopoverAnchor(indexedItem)
+        indexedItem.menuItems.forEach(safeRemoveItem)
+        if let removeIndex = indexedItems.firstIndex(of: indexedItem) {
           indexedItems.remove(at: removeIndex)
         }
       }
@@ -227,50 +408,50 @@ class Menu: NSMenu, NSMenuDelegate {
     }
   }
 
-  func pinOrUnpin() {
+  func pinOrUnpin() -> Bool {
     guard let altItemToPin = highlightedItem as? HistoryMenuItem else {
-      return
+      return false
     }
 
     guard let historyItem = indexedItems.first(where: { $0.item == altItemToPin.item }) else {
-      return
+      return false
     }
 
     if altItemToPin.isPinned {
       for menuItem in historyItem.menuItems {
         menuItem.unpin()
-        removeItem(menuItem)
+        safeRemoveItem(menuItem)
       }
+      removePopoverAnchor(historyItem)
     } else {
       let pin = HistoryItem.randomAvailablePin
       for menuItem in historyItem.menuItems {
         menuItem.pin(pin)
-        removeItem(menuItem)
+        safeRemoveItem(menuItem)
       }
+      removePopoverAnchor(historyItem)
     }
 
     history.update(altItemToPin.item)
 
-    let sortedItems = Sorter(by: UserDefaults.standard.sortBy).sort(history.all)
-    if let newIndex = sortedItems.firstIndex(where: { $0 == altItemToPin.item }) {
+    let sortedItems = history.all
+    if let newIndex = sortedItems.firstIndex(of: altItemToPin.item) {
       if let removeIndex = indexedItems.firstIndex(of: historyItem) {
         indexedItems.remove(at: removeIndex)
         indexedItems.insert(historyItem, at: newIndex)
       }
 
-      let menuItemIndex = newIndex * historyMenuItemsGroup + historyMenuItemOffset
-      // Ensure that it's possible to insert at the specified item.
-      // This won't be possible when unpinning item that should be inserted
-      // at index higher than maxVisibleItems.
-      if menuItemIndex <= items.count {
-        for menuItem in historyItem.menuItems.reversed() {
-          insertItem(menuItem, at: menuItemIndex)
-        }
+      let menuItemIndex = newIndex * (historyMenuItemsGroup + previewMenuItemOffset) + historyMenuItemOffset
+      insertPopoverAnchor(historyItem, menuItemIndex)
+      for menuItem in historyItem.menuItems.reversed() {
+        safeInsertItem(menuItem, at: menuItemIndex)
       }
 
       updateFilter(filter: "") // show all items
-      highlight(historyItem.menuItems.first)
+      highlight(historyItem.menuItems[1])
     }
+
+    return true
   }
 
   func resizeImageMenuItems() {
@@ -279,8 +460,32 @@ class Menu: NSMenu, NSMenuDelegate {
     }
   }
 
-  private func highlightNext(_ items: [NSMenuItem], alt: Bool) -> Bool {
-    let highlightableItems = self.highlightableItems(items, alt: alt)
+  func regenerateMenuItemTitles() {
+    historyMenuItems.forEach {
+      $0.regenerateTitle()
+    }
+    update()
+  }
+
+  func updateUnpinnedItemsVisibility() {
+    let historyMenuItemsCount = historyMenuItems.filter({ !$0.isPinned }).count
+
+    if maxVisibleItems > 0 {
+      if maxVisibleItems <= historyMenuItemsCount {
+        hideUnpinnedItemsOverLimit(historyMenuItemsCount)
+      } else if maxVisibleItems > historyMenuItemsCount {
+        appendUnpinnedItemsUntilLimit(historyMenuItemsCount)
+      }
+    } else {
+      let allItemsCount = indexedItems.flatMap({ $0.menuItems }).filter({ !$0.isPinned }).count
+      if historyMenuItemsCount < allItemsCount {
+        appendUnpinnedItemsUntilLimit(allItemsCount)
+      }
+    }
+  }
+
+  private func highlightNext(_ items: [NSMenuItem]) -> Bool {
+    let highlightableItems = self.highlightableItems(items)
     let currentHighlightedItem = highlightedItem ?? highlightableItems.first
     var itemsIterator = highlightableItems.makeIterator()
     while let item = itemsIterator.next() {
@@ -294,20 +499,29 @@ class Menu: NSMenu, NSMenuDelegate {
     return false
   }
 
-  private func highlightableItems(_ items: [NSMenuItem], alt: Bool = false) -> [NSMenuItem] {
-    return items.filter { !$0.isSeparatorItem && $0.isEnabled && $0.isAlternate == alt }
+  private func highlightableItems(_ items: [NSMenuItem]) -> [NSMenuItem] {
+    return items.filter { !$0.isSeparatorItem && $0.isEnabled && !$0.isHidden }
   }
 
   private func highlight(_ itemToHighlight: NSMenuItem?) {
+    if #available(macOS 14, *) {
+      DispatchQueue.main.async { self.highlightItem(itemToHighlight) }
+    } else {
+      highlightItem(itemToHighlight)
+    }
+  }
+
+  private func highlightItem(_ itemToHighlight: NSMenuItem?) {
     let highlightItemSelector = NSSelectorFromString("highlightItem:")
-    if let item = itemToHighlight {
-      // we need to highlight filter menu item to force menu redrawing
-      // when it has more items that can fit into the screen height
-      // and scrolling items are added to the top and bottom of menu
-      perform(highlightItemSelector, with: items.first)
-      if items.contains(item) {
-        perform(highlightItemSelector, with: item)
-      }
+    // we need to highlight filter menu item to force menu redrawing
+    // when it has more items that can fit into the screen height
+    // and scrolling items are added to the top and bottom of menu
+    perform(highlightItemSelector, with: items.first)
+    if let item = itemToHighlight, !item.isHighlighted, items.contains(item) {
+      perform(highlightItemSelector, with: item)
+    } else {
+      // Unhighlight current item.
+      perform(highlightItemSelector, with: nil)
     }
   }
 
@@ -329,66 +543,68 @@ class Menu: NSMenu, NSMenuDelegate {
     }
   }
 
-  private func clear(_ itemsToClear: [HistoryMenuItem]) {
-    itemsToClear.forEach({ menuItem in
-      if items.contains(menuItem) {
-        removeItem(menuItem)
-      }
+  private func clear(_ itemsToClear: [IndexedItem]) {
+    for indexedItem in itemsToClear {
+      removePopoverAnchor(indexedItem)
+      indexedItem.menuItems.forEach(safeRemoveItem)
 
-      if let removeIndex = indexedItems.firstIndex(where: { $0.item == menuItem.item }) {
+      if let removeIndex = indexedItems.firstIndex(of: indexedItem) {
         indexedItems.remove(at: removeIndex)
       }
-    })
+    }
   }
 
-  private func updateUnpinnedItemsVisibility() {
-    let historyMenuItemsCount = historyMenuItems.filter({ !$0.isPinned }).count
+  private func addPopoverAnchor(_ item: IndexedItem) {
+    if #unavailable(macOS 14), let popoverAnchor = item.popoverAnchor {
+      safeAddItem(popoverAnchor)
+    }
+  }
 
-    if maxVisibleItems > 0 {
-      if maxVisibleItems <= historyMenuItemsCount {
-        hideUnpinnedItemsOverLimit(historyMenuItemsCount)
-      } else if maxVisibleItems > historyMenuItemsCount {
-        appendUnpinnedItemsUntilLimit(historyMenuItemsCount)
-      }
-    } else {
-      let allItemsCount = indexedItems.flatMap({ $0.menuItems }).filter({ !$0.isPinned }).count
-      if historyMenuItemsCount < allItemsCount {
-        showAllUnpinnedItems()
-      }
+  private func insertPopoverAnchor(_ item: IndexedItem, _ index: Int) {
+    if #unavailable(macOS 14), let popoverAnchor = item.popoverAnchor {
+      safeInsertItem(popoverAnchor, at: index)
+    }
+  }
+
+  private func removePopoverAnchor(_ item: IndexedItem) {
+    if #unavailable(macOS 14) {
+      safeRemoveItem(item.popoverAnchor)
     }
   }
 
   private func hideUnpinnedItemsOverLimit(_ limit: Int) {
     var limit = limit
-    for historyItem in historyMenuItems.filter({ !$0.isPinned }).reversed() {
-      if limit > maxVisibleItems {
-        removeItem(historyItem)
-        limit -= 1
-      } else {
-        break
+    for indexedItem in indexedItems.filter({ $0.item.pin == nil }).reversed() {
+      let menuItems = indexedItem.menuItems.filter({ historyMenuItems.contains($0) })
+      if !menuItems.isEmpty {
+        removePopoverAnchor(indexedItem)
+        menuItems.forEach { historyMenuItem in
+          safeRemoveItem(historyMenuItem)
+          limit -= 1
+        }
+      }
+
+      if maxVisibleItems != 0 && maxVisibleItems == limit {
+        return
       }
     }
   }
 
   private func appendUnpinnedItemsUntilLimit(_ limit: Int) {
     var limit = limit
-    for historyItem in indexedItems.flatMap({ $0.menuItems }).filter({ !$0.isPinned }) {
-      if !historyMenuItems.contains(historyItem) {
-        limit += 1
-        if let lastItem = lastUnpinnedHistoryMenuItem {
-          insertItem(historyItem, at: index(of: lastItem))
+    for indexedItem in indexedItems.filter({ $0.item.pin == nil }) {
+      let menuItems = indexedItem.menuItems.filter({ !historyMenuItems.contains($0) })
+      if !menuItems.isEmpty, let lastItem = lastUnpinnedHistoryMenuItem {
+        let index = index(of: lastItem) + 1 + previewMenuItemOffset
+        insertPopoverAnchor(indexedItem, index)
+        menuItems.reversed().forEach { historyMenuItem in
+          safeInsertItem(historyMenuItem, at: index)
+          limit += 1
         }
       }
-      if maxVisibleItems == limit {
-        break
-      }
-    }
-  }
 
-  private func showAllUnpinnedItems() {
-    for historyItem in indexedItems.flatMap({ $0.menuItems }).filter({ !$0.isPinned }) {
-      if !historyMenuItems.contains(historyItem) {
-        insertItem(historyItem, at: historyMenuItems.count + historyMenuItemOffset)
+      if maxVisibleItems != 0 && maxVisibleItems == limit {
+        return
       }
     }
   }
@@ -412,12 +628,58 @@ class Menu: NSMenu, NSMenuDelegate {
   private func clearRemovedItems() {
     let currentHistoryItems = history.all
     for indexedItem in indexedItems where !currentHistoryItems.contains(indexedItem.item) {
-      for menuItem in indexedItem.menuItems where items.contains(menuItem) {
-        removeItem(menuItem)
-      }
+      removePopoverAnchor(indexedItem)
+      indexedItem.menuItems.forEach(safeRemoveItem)
+
       if let removeIndex = indexedItems.firstIndex(of: indexedItem) {
         indexedItems.remove(at: removeIndex)
       }
+    }
+  }
+
+  private func safeAddItem(_ item: NSMenuItem) {
+    guard !items.contains(item) else {
+      return
+    }
+
+    addItem(item)
+  }
+
+  private func safeInsertItem(_ item: NSMenuItem, at index: Int) {
+    guard !items.contains(item), index <= items.count else {
+      return
+    }
+
+    insertItem(item, at: index)
+  }
+
+  private func safeRemoveItem(_ item: NSMenuItem?) {
+    guard let item = item,
+          items.contains(item) else {
+      return
+    }
+
+    removeItem(item)
+  }
+
+  private func offloadCurrentPreview() {
+    previewThrottle.cancel()
+    previewPopover?.close()
+    previewPopover = nil
+  }
+
+  private func ensureInEventTrackingModeIfVisible(
+    dispatchLater: Bool = false,
+    block: @escaping () -> Void
+  ) {
+    if isVisible && (
+      dispatchLater ||
+      RunLoop.current != RunLoop.main ||
+      RunLoop.current.currentMode != .eventTracking
+    ) {
+      RunLoop.main.perform(inModes: [.eventTracking], block: block)
+    } else {
+      block()
     }
   }
 }

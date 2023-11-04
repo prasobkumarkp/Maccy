@@ -2,7 +2,6 @@ import XCTest
 @testable import Maccy
 
 class UserDefaultsTests: XCTestCase {
-  let savedFuzzySearch = UserDefaults.standard.fuzzySearch
   let savedIgnoreEvents = UserDefaults.standard.ignoreEvents
   let savedIgnoredPasteboardTypes = UserDefaults.standard.ignoredPasteboardTypes
   let savedPasteByDefault = UserDefaults.standard.pasteByDefault
@@ -13,12 +12,10 @@ class UserDefaultsTests: XCTestCase {
   let savedSaratovSeparator = UserDefaults.standard.saratovSeparator
   let savedShowInStatusBar = UserDefaults.standard.showInStatusBar
   let savedSize = UserDefaults.standard.size
-  let savedStorage = UserDefaults.standard.storage
 
   override func setUp() {
     super.setUp()
 
-    UserDefaults.standard.removeObject(forKey: UserDefaults.Keys.fuzzySearch)
     UserDefaults.standard.removeObject(forKey: UserDefaults.Keys.ignoreEvents)
     UserDefaults.standard.removeObject(forKey: UserDefaults.Keys.ignoredPasteboardTypes)
     UserDefaults.standard.removeObject(forKey: UserDefaults.Keys.pasteByDefault)
@@ -35,7 +32,6 @@ class UserDefaultsTests: XCTestCase {
   override func tearDown() {
     super.tearDown()
 
-    UserDefaults.standard.fuzzySearch = savedFuzzySearch
     UserDefaults.standard.ignoreEvents = savedIgnoreEvents
     UserDefaults.standard.ignoredPasteboardTypes = savedIgnoredPasteboardTypes
     UserDefaults.standard.pasteByDefault = savedPasteByDefault
@@ -46,11 +42,9 @@ class UserDefaultsTests: XCTestCase {
     UserDefaults.standard.saratovSeparator = savedSaratovSeparator
     UserDefaults.standard.showInStatusBar = savedShowInStatusBar
     UserDefaults.standard.size = savedSize
-    UserDefaults.standard.storage = savedStorage
   }
 
   func testDefaultValues() {
-    XCTAssertEqual(UserDefaults.standard.fuzzySearch, false)
     XCTAssertEqual(UserDefaults.standard.ignoreEvents, false)
     XCTAssertEqual(UserDefaults.standard.ignoredPasteboardTypes, Set())
     XCTAssertEqual(UserDefaults.standard.pasteByDefault, false)
@@ -61,13 +55,9 @@ class UserDefaultsTests: XCTestCase {
     XCTAssertEqual(UserDefaults.standard.saratovSeparator, false)
     XCTAssertEqual(UserDefaults.standard.showInStatusBar, true)
     XCTAssertEqual(UserDefaults.standard.size, 200)
-    XCTAssertEqual(UserDefaults.standard.storage, [])
   }
 
   func testChanging() {
-    let item = HistoryItemOld(value: "foo".data(using: .utf8)!)
-
-    UserDefaults.standard.fuzzySearch = true
     UserDefaults.standard.ignoreEvents = true
     UserDefaults.standard.ignoredPasteboardTypes = ["foo", "bar"]
     UserDefaults.standard.pasteByDefault = true
@@ -78,9 +68,7 @@ class UserDefaultsTests: XCTestCase {
     UserDefaults.standard.saratovSeparator = true
     UserDefaults.standard.showInStatusBar = false
     UserDefaults.standard.size = 100
-    UserDefaults.standard.storage = [item]
 
-    XCTAssertEqual(UserDefaults.standard.fuzzySearch, true)
     XCTAssertEqual(UserDefaults.standard.ignoreEvents, true)
     XCTAssertEqual(UserDefaults.standard.ignoredPasteboardTypes, Set(["foo", "bar"]))
     XCTAssertEqual(UserDefaults.standard.pasteByDefault, true)
@@ -91,6 +79,5 @@ class UserDefaultsTests: XCTestCase {
     XCTAssertEqual(UserDefaults.standard.saratovSeparator, true)
     XCTAssertEqual(UserDefaults.standard.showInStatusBar, false)
     XCTAssertEqual(UserDefaults.standard.size, 100)
-    XCTAssertEqual(UserDefaults.standard.storage, [item])
   }
 }

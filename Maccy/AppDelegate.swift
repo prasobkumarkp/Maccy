@@ -1,10 +1,14 @@
 import Cocoa
+import Intents
 import KeyboardShortcuts
+import LaunchAtLogin
 import Sauce
 import Sparkle
 
 @NSApplicationMain
 class AppDelegate: NSObject, NSApplicationDelegate {
+  @IBOutlet weak var pasteMenuItem: NSMenuItem!
+
   private var hotKey: GlobalHotKey!
   private var maccy: Maccy!
 
@@ -19,6 +23,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   func applicationDidFinishLaunching(_ aNotification: Notification) {
+    LaunchAtLogin.migrateIfNeeded()
     migrateUserDefaults()
     clearOrphanRecords()
 
@@ -38,59 +43,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     CoreDataManager.shared.saveContext()
   }
 
+  @available(macOS 11.0, *)
+  func application(_ application: NSApplication, handlerFor intent: INIntent) -> Any? {
+    if intent is SelectIntent {
+      return SelectIntentHandler(maccy)
+    } else if intent is ClearIntent {
+      return ClearIntentHandler(maccy)
+    } else if intent is GetIntent {
+      return GetIntentHandler(maccy)
+    }
+
+    return nil
+  }
+
   // swiftlint:disable cyclomatic_complexity
   // swiftlint:disable function_body_length
   private func migrateUserDefaults() {
-    if UserDefaults.standard.migrations["2020-02-22-introduce-history-item"] != true {
-      if let oldStorage = UserDefaults.standard.array(forKey: UserDefaults.Keys.storage) as? [String] {
-        UserDefaults.standard.storage = oldStorage.compactMap({ item in
-          if let data = item.data(using: .utf8) {
-            return HistoryItemOld(value: data)
-          } else {
-            return nil
-          }
-        })
-        UserDefaults.standard.migrations["2020-02-22-introduce-history-item"] = true
-      }
-    }
-
-    if UserDefaults.standard.migrations["2020-02-22-history-item-add-copied-at"] != true {
-      UserDefaults.standard.storage = UserDefaults.standard.storage.map({ item in
-        let migratedItem = item
-        migratedItem.firstCopiedAt = Date()
-        migratedItem.lastCopiedAt = Date()
-        return migratedItem
-      })
-      UserDefaults.standard.migrations["2020-02-22-history-item-add-copied-at"] = true
-    }
-
-    if UserDefaults.standard.migrations["2020-02-22-history-item-add-number-of-copies"] != true {
-      UserDefaults.standard.storage = UserDefaults.standard.storage.map({ item in
-        let migratedItem = item
-        migratedItem.numberOfCopies = 1
-        return migratedItem
-      })
-      UserDefaults.standard.migrations["2020-02-22-history-item-add-number-of-copies"] = true
-    }
-
-    if UserDefaults.standard.migrations["2020-04-18-switch-storage-to-core-data"] != true {
-      for item in UserDefaults.standard.storage {
-        var content: HistoryItemContent
-        if item.type == .image {
-          content = HistoryItemContent(type: NSPasteboard.PasteboardType.tiff.rawValue, value: item.value)
-        } else {
-          content = HistoryItemContent(type: NSPasteboard.PasteboardType.string.rawValue, value: item.value)
-        }
-        let newItem = HistoryItem(contents: [content])
-        newItem.firstCopiedAt = item.firstCopiedAt
-        newItem.lastCopiedAt = item.lastCopiedAt
-        newItem.numberOfCopies = item.numberOfCopies
-        newItem.pin = item.pin
-      }
-      CoreDataManager.shared.saveContext()
-      UserDefaults.standard.migrations["2020-04-18-switch-storage-to-core-data"] = true
-    }
-
     if UserDefaults.standard.migrations["2020-04-25-allow-custom-ignored-types"] != true {
       UserDefaults.standard.ignoredPasteboardTypes = [
         "de.petermaurer.TransientPasteboardType",
@@ -154,7 +122,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     if UserDefaults.standard.migrations["2021-06-28-add-title-to-history-item"] != true {
-      for item in HistoryItem.all() {
+      for item in HistoryItem.all {
         item.title = item.generateTitle(item.getContents())
       }
       CoreDataManager.shared.saveContext()
@@ -177,6 +145,33 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       CoreDataManager.shared.saveContext()
 
       UserDefaults.standard.migrations["2021-10-16-remove-dynamic-pasteboard-types"] = true
+    }
+
+    if UserDefaults.standard.migrations["2022-08-01-rename-suppress-clear-alert"] != true {
+      if let suppressClearAlert = UserDefaults.standard.object(forKey: "supressClearAlert") as? Bool {
+        UserDefaults.standard.suppressClearAlert = suppressClearAlert
+        UserDefaults.standard.removeObject(forKey: "supressClearAlert")
+      }
+
+      UserDefaults.standard.migrations["2022-08-01-rename-suppress-clear-alert"] = true
+    }
+
+    if UserDefaults.standard.migrations["2022-11-14-add-html-rtf-to-supported-types"] != true {
+      if UserDefaults.standard.enabledPasteboardTypes.contains(.string) {
+        UserDefaults.standard.enabledPasteboardTypes =
+          UserDefaults.standard.enabledPasteboardTypes.union([.html, .rtf])
+      }
+
+      UserDefaults.standard.migrations["2022-11-14-add-html-rtf-to-supported-types"] = true
+    }
+
+    if UserDefaults.standard.migrations["2023-01-22-add-regexp-search-mode"] != true {
+      if UserDefaults.standard.bool(forKey: "fuzzySearch") {
+        UserDefaults.standard.searchMode = Search.Mode.fuzzy.rawValue
+      }
+      UserDefaults.standard.removeObject(forKey: "fuzzySearch")
+
+      UserDefaults.standard.migrations["2023-01-22-add-regexp-search-mode"] = true
     }
   }
 

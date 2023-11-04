@@ -3,6 +3,7 @@ import XCTest
 
 class HistoryTests: XCTestCase {
   let savedSize = UserDefaults.standard.size
+  let savedSortBy = UserDefaults.standard.sortBy
   let history = History()
 
   override func setUp() {
@@ -10,12 +11,14 @@ class HistoryTests: XCTestCase {
     CoreDataManager.inMemory = true
     history.clear()
     UserDefaults.standard.size = 10
+    UserDefaults.standard.sortBy = "firstCopiedAt"
   }
 
   override func tearDown() {
     super.tearDown()
     CoreDataManager.inMemory = false
     UserDefaults.standard.size = savedSize
+    UserDefaults.standard.sortBy = savedSortBy
   }
 
   func testDefaultIsEmpty() {
@@ -34,17 +37,20 @@ class HistoryTests: XCTestCase {
     let first = historyItem("foo")
     first.pin = "f"
     first.title = "xyz"
+    first.application = "iTerm.app"
     history.add(first)
     let second = historyItem("bar")
     history.add(second)
     let third = historyItem("foo")
+    third.application = "Xcode.app"
     history.add(third)
 
-    XCTAssertEqual(history.all, [second, third])
-    XCTAssertTrue(history.all[1].lastCopiedAt > history.all[0].firstCopiedAt)
-    XCTAssertEqual(history.all[1].numberOfCopies, 2)
-    XCTAssertEqual(history.all[1].pin, "f")
-    XCTAssertEqual(history.all[1].title, "xyz")
+    XCTAssertEqual(history.all, [third, second])
+    XCTAssertTrue(history.all[0].lastCopiedAt > history.all[0].firstCopiedAt)
+    XCTAssertEqual(history.all[0].numberOfCopies, 2)
+    XCTAssertEqual(history.all[0].pin, "f")
+    XCTAssertEqual(history.all[0].title, "xyz")
+    XCTAssertEqual(history.all[0].application, "iTerm.app")
   }
 
   func testAddingItemThatIsSupersededByExisting() {
@@ -64,6 +70,45 @@ class HistoryTests: XCTestCase {
     XCTAssertEqual(Set(history.all[0].getContents()), Set(contents))
   }
 
+  func testAddingItemWithDifferentModifiedType() {
+    let contents = [
+      HistoryItemContent(type: NSPasteboard.PasteboardType.string.rawValue, value: "one".data(using: .utf8)!),
+      HistoryItemContent(type: NSPasteboard.PasteboardType.modified.rawValue, value: "1".data(using: .utf8)!)
+
+    ]
+    let first = HistoryItem(contents: contents)
+    history.add(first)
+
+    let second = HistoryItem(contents: [
+      HistoryItemContent(type: NSPasteboard.PasteboardType.string.rawValue, value: "one".data(using: .utf8)!),
+      HistoryItemContent(type: NSPasteboard.PasteboardType.modified.rawValue, value: "2".data(using: .utf8)!)
+    ])
+    history.add(second)
+
+    XCTAssertEqual(history.all, [second])
+    XCTAssertEqual(Set(history.all[0].getContents()), Set(contents))
+  }
+
+  func testAddingItemFromMaccy() {
+    let contents = [
+      HistoryItemContent(type: NSPasteboard.PasteboardType.string.rawValue, value: "one".data(using: .utf8)!)
+    ]
+    let first = HistoryItem(contents: contents)
+    first.application = "Xcode.app"
+    history.add(first)
+
+    let second = HistoryItem(contents: [
+      HistoryItemContent(type: NSPasteboard.PasteboardType.string.rawValue, value: "one".data(using: .utf8)!),
+      HistoryItemContent(type: NSPasteboard.PasteboardType.fromMaccy.rawValue, value: "".data(using: .utf8)!)
+    ])
+    second.application = "Maccy.app"
+    history.add(second)
+
+    XCTAssertEqual(history.all, [second])
+    XCTAssertEqual(history.all[0].application, "Xcode.app")
+    XCTAssertEqual(Set(history.all[0].getContents()), Set(contents))
+  }
+
   func testUpdate() {
     history.add(historyItem("foo"))
     let historyItem = history.all[0]
@@ -72,6 +117,20 @@ class HistoryTests: XCTestCase {
     XCTAssertEqual(history.all[0].numberOfCopies, 0)
     CoreDataManager.shared.viewContext.refresh(historyItem, mergeChanges: false)
     XCTAssertEqual(history.all[0].numberOfCopies, 0)
+  }
+
+  func testModifiedAfterCopying() {
+    history.add(historyItem("foo"))
+
+    let modifiedItem = historyItem("bar")
+    modifiedItem.addToContents(HistoryItemContent(
+      type: NSPasteboard.PasteboardType.modified.rawValue,
+      value: String(Clipboard.shared.changeCount).data(using: .utf8)
+    ))
+    history.add(modifiedItem)
+
+    XCTAssertEqual(history.all, [modifiedItem])
+    XCTAssertEqual(history.all[0].text, "bar")
   }
 
   func testClearingUnpinned() {

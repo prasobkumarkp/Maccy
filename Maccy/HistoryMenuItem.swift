@@ -1,14 +1,21 @@
 import Cocoa
 
 class HistoryMenuItem: NSMenuItem {
-  public var isPinned = false
-  public var item: HistoryItem!
-  public var value = ""
+  var isPinned = false
+  var item: HistoryItem!
+  var value = ""
 
   internal var clipboard: Clipboard!
 
-  private let tooltipMaxLength = 5_000
   private let imageMaxWidth: CGFloat = 340.0
+
+  // Assign "empty" title to the image (but it can't be empty string).
+  // This is required for onStateImage to render correctly when item is pinned.
+  // Otherwise, it's not rendered with the error:
+  //
+  // GetEventParameter(inEvent, kEventParamMenuTextBaseline, typeCGFloat, NULL, sizeof baseline, NULL, &baseline)
+  // returned error -9870 on line 2078 in -[NSCarbonMenuImpl _carbonDrawStateImageForMenuItem:withEvent:]
+  private let imageTitle = " "
 
   private let highlightFont: NSFont = {
     if #available(macOS 11, *) {
@@ -26,8 +33,6 @@ class HistoryMenuItem: NSMenuItem {
   }
 
   init(item: HistoryItem, clipboard: Clipboard) {
-    UserDefaults.standard.register(defaults: [UserDefaults.Keys.imageMaxHeight: UserDefaults.Values.imageMaxHeight])
-
     super.init(title: "", action: #selector(onSelect(_:)), keyEquivalent: "")
 
     self.clipboard = clipboard
@@ -39,8 +44,12 @@ class HistoryMenuItem: NSMenuItem {
       loadImage(item)
     } else if isFile(item) {
       loadFile(item)
-    } else {
-      loadString(item, from: .string)
+    } else if isText(item) {
+      loadText(item)
+    } else if isRTF(item) {
+      loadRTF(item)
+    } else if isHTML(item) {
+      loadHTML(item)
     }
 
     if let itemPin = item.pin {
@@ -53,7 +62,7 @@ class HistoryMenuItem: NSMenuItem {
       self.keyEquivalent = item.pin ?? ""
     })
     editTitleObserver = item.observe(\.title, options: .new, changeHandler: { item, _ in
-      self.title = item.title
+      self.title = item.title ?? ""
     })
   }
 
@@ -65,6 +74,8 @@ class HistoryMenuItem: NSMenuItem {
   @objc
   func onSelect(_ sender: NSMenuItem) {
     select()
+    // Only call this in the App Store version.
+    // AppStoreReview.ask()
   }
 
   func select() {
@@ -97,8 +108,16 @@ class HistoryMenuItem: NSMenuItem {
     loadImage(item)
   }
 
+  func regenerateTitle() {
+    if isImage(item) {
+      return
+    }
+
+    item.title = item.generateTitle(item.getContents())
+  }
+
   func highlight(_ ranges: [ClosedRange<Int>]) {
-    guard !ranges.isEmpty else {
+    guard !ranges.isEmpty, title != imageTitle else {
       self.attributedTitle = nil
       return
     }
@@ -108,107 +127,92 @@ class HistoryMenuItem: NSMenuItem {
       let rangeLength = range.upperBound - range.lowerBound + 1
       let highlightRange = NSRange(location: range.lowerBound, length: rangeLength)
 
-      attributedTitle.addAttribute(.font, value: highlightFont, range: highlightRange)
+      if Range(highlightRange, in: title) != nil {
+        attributedTitle.addAttribute(.font, value: highlightFont, range: highlightRange)
+      }
     }
 
     self.attributedTitle = attributedTitle
   }
 
   private func isImage(_ item: HistoryItem) -> Bool {
-    return contentData(item, [.tiff, .png]) != nil
+    return item.image != nil
   }
 
   private func isFile(_ item: HistoryItem) -> Bool {
-    return contentData(item, [.fileURL]) != nil
+    return item.fileURL != nil
   }
 
-  private func isString(_ item: HistoryItem) -> Bool {
-    return contentData(item, [.string]) != nil
+  private func isRTF(_ item: HistoryItem) -> Bool {
+    return item.rtf != nil
+  }
+
+  private func isHTML(_ item: HistoryItem) -> Bool {
+    return item.html != nil
+  }
+
+  private func isText(_ item: HistoryItem) -> Bool {
+    return item.text != nil
   }
 
   private func loadImage(_ item: HistoryItem) {
-    if let contentData = contentData(item, [.tiff, .png]) {
-      if let image = NSImage(data: contentData) {
-        if image.size.width > imageMaxWidth {
-          image.size.height = image.size.height / (image.size.width / imageMaxWidth)
-          image.size.width = imageMaxWidth
-        }
-
-        let imageMaxHeight = CGFloat(UserDefaults.standard.imageMaxHeight)
-        if image.size.height > imageMaxHeight {
-          image.size.width = image.size.width / (image.size.height / imageMaxHeight)
-          image.size.height = imageMaxHeight
-        }
-
-        self.image = image
-        self.toolTip = defaultTooltip(item)
-
-        // Assign "empty" title to the image (but it can't be empty string).
-        // This is required for onStateImage to render correctly when item is pinned.
-        // Otherwise, it's not rendered with the error:
-        //
-        // GetEventParameter(inEvent, kEventParamMenuTextBaseline, typeCGFloat, NULL, sizeof baseline, NULL, &baseline)
-        // returned error -9870 on line 2078 in -[NSCarbonMenuImpl _carbonDrawStateImageForMenuItem:withEvent:]
-        self.title = " "
-      }
+    guard let image = item.image else {
+      return
     }
+
+    if image.size.width > imageMaxWidth {
+      image.size.height = image.size.height / (image.size.width / imageMaxWidth)
+      image.size.width = imageMaxWidth
+    }
+
+    let imageMaxHeight = CGFloat(UserDefaults.standard.imageMaxHeight)
+    if image.size.height > imageMaxHeight {
+      image.size.width = image.size.width / (image.size.height / imageMaxHeight)
+      image.size.height = imageMaxHeight
+    }
+
+    self.image = image
+    self.title = imageTitle
   }
 
   private func loadFile(_ item: HistoryItem) {
-    if let fileURLData = contentData(item, [.fileURL]) {
-      if let fileURL = URL(dataRepresentation: fileURLData, relativeTo: nil, isAbsolute: true) {
-        if let string = fileURL.absoluteString.removingPercentEncoding {
-          self.value = string
-          self.title = item.title
-          self.image = ColorImage.from(title)
-          self.toolTip = """
-          \(string.shortened(to: tooltipMaxLength))
-
-          \(defaultTooltip(item))
-          """
-        }
-      }
+    guard let fileURL = item.fileURL,
+          let string = fileURL.absoluteString.removingPercentEncoding else {
+      return
     }
+
+    self.value = string
+    self.title = item.title ?? ""
+    self.image = ColorImage.from(title)
   }
 
-  private func loadString(_ item: HistoryItem, from: NSPasteboard.PasteboardType) {
-    if let contentData = contentData(item, [from]) {
-      if let string = String(data: contentData, encoding: .utf8) {
-        self.value = string
-        self.title = item.title
-        self.image = ColorImage.from(title)
-        self.toolTip = """
-        \(string.shortened(to: tooltipMaxLength))
-
-        \(defaultTooltip(item))
-        """
-      }
+  private func loadRTF(_ item: HistoryItem) {
+    guard let string = item.rtf?.string else {
+      return
     }
+
+    self.value = string
+    self.title = item.title ?? ""
+    self.image = ColorImage.from(title)
   }
 
-  private func contentData(_ item: HistoryItem, _ types: [NSPasteboard.PasteboardType]) -> Data? {
-    let contents = item.getContents()
-    let content = contents.first(where: { content in
-      return types.contains(NSPasteboard.PasteboardType(content.type))
-    })
+  private func loadHTML(_ item: HistoryItem) {
+    guard let string = item.html?.string else {
+      return
+    }
 
-    return content?.value
+    self.value = string
+    self.title = item.title ?? ""
+    self.image = ColorImage.from(title)
   }
 
-  private func defaultTooltip(_ item: HistoryItem) -> String {
-    return """
-    \(NSLocalizedString("first_copy_time_tooltip", comment: "")): \(formatDate(item.firstCopiedAt))
-    \(NSLocalizedString("last_copy_time_tooltip", comment: "")): \(formatDate(item.lastCopiedAt))
-    \(NSLocalizedString("number_of_copies_tooltip", comment: "")): \(item.numberOfCopies)
+  private func loadText(_ item: HistoryItem) {
+    guard let string = item.text else {
+      return
+    }
 
-    \(NSLocalizedString("history_item_tooltip", comment: ""))
-    """
-  }
-
-  private func formatDate(_ date: Date) -> String {
-    let formatter = DateFormatter()
-    formatter.dateFormat = "MMM d, H:mm:ss"
-    formatter.timeZone = TimeZone.current
-    return formatter.string(from: date)
+    self.value = string
+    self.title = item.title ?? ""
+    self.image = ColorImage.from(title)
   }
 }

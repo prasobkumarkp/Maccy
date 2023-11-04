@@ -1,14 +1,17 @@
 import AppKit
 
 class History {
-  public var all: [HistoryItem] {
-    var unpinned = HistoryItem.unpinned()
+  var all: [HistoryItem] {
+    let sorter = Sorter(by: UserDefaults.standard.sortBy)
+    var unpinned = sorter.sort(HistoryItem.unpinned)
     while unpinned.count > UserDefaults.standard.size {
       remove(unpinned.removeLast())
     }
 
-    return HistoryItem.all()
+    return sorter.sort(HistoryItem.all)
   }
+
+  private var sessionLog: [Int: HistoryItem] = [:]
 
   init() {
     UserDefaults.standard.register(defaults: [UserDefaults.Keys.size: UserDefaults.Values.size])
@@ -19,11 +22,16 @@ class History {
 
   func add(_ item: HistoryItem) {
     if let existingHistoryItem = findSimilarItem(item) {
-      item.contents = existingHistoryItem.contents
+      if isModified(item) == nil {
+        item.contents = existingHistoryItem.contents
+      }
       item.firstCopiedAt = existingHistoryItem.firstCopiedAt
       item.numberOfCopies += existingHistoryItem.numberOfCopies
       item.pin = existingHistoryItem.pin
       item.title = existingHistoryItem.title
+      if !item.fromMaccy {
+        item.application = existingHistoryItem.application
+      }
       remove(existingHistoryItem)
     } else {
       if UserDefaults.standard.playSounds {
@@ -31,6 +39,7 @@ class History {
       }
     }
 
+    sessionLog[Clipboard.shared.changeCount] = item
     CoreDataManager.shared.saveContext()
   }
 
@@ -55,9 +64,17 @@ class History {
   private func findSimilarItem(_ item: HistoryItem) -> HistoryItem? {
     let duplicates = all.filter({ $0 == item || $0.supersedes(item) })
     if duplicates.count > 1 {
-      return duplicates.last
+      return duplicates.first(where: { $0.objectID != item.objectID })
     } else {
-      return nil
+      return isModified(item)
     }
+  }
+
+  private func isModified(_ item: HistoryItem) -> HistoryItem? {
+    if let modified = item.modified, sessionLog.keys.contains(modified) {
+      return sessionLog[modified]
+    }
+
+    return nil
   }
 }

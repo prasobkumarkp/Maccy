@@ -1,30 +1,40 @@
-import Cocoa
+import AppKit
 
 extension UserDefaults {
   public struct Keys {
     static let avoidTakingFocus = "avoidTakingFocus"
     static let clearOnQuit = "clearOnQuit"
+    static let clearSystemClipboard = "clearSystemClipboard"
     static let enabledPasteboardTypes = "enabledPasteboardTypes"
-    static let fuzzySearch = "fuzzySearch"
     static let hideFooter = "hideFooter"
     static let hideSearch = "hideSearch"
     static let hideTitle = "hideTitle"
     static let ignoreEvents = "ignoreEvents"
+    static let ignoreOnlyNextEvent = "ignoreOnlyNextEvent"
+    static let ignoreAllAppsExceptListed = "ignoreAllAppsExceptListed"
     static let ignoredApps = "ignoredApps"
     static let ignoredPasteboardTypes = "ignoredPasteboardTypes"
     static let imageMaxHeight = "imageMaxHeight"
+    static let lastReviewRequestedAt = "lastReviewRequestedAt"
     static let maxMenuItems = "maxMenuItems"
+    static let maxMenuItemLength = "maxMenuItemLength"
+    static let menuIcon = "menuIcon"
     static let migrations = "migrations"
+    static let numberOfUsages = "numberOfUsages"
     static let pasteByDefault = "pasteByDefault"
     static let pinTo = "pinTo"
     static let playSounds = "playSounds"
     static let popupPosition = "popupPosition"
+    static let popupScreen = "popupScreen"
+    static let previewDelay = "previewDelay"
+    static let searchMode = "searchMode"
     static let removeFormattingByDefault = "removeFormattingByDefault"
     static let saratovSeparator = "enableSaratovSeparator"
     static let showRecentCopyInMenuBar = "showRecentCopyInMenuBar"
     static let size = "historySize"
     static let sortBy = "sortBy"
-    static let supressClearAlert = "supressClearAlert"
+    static let suppressClearAlert = "suppressClearAlert"
+    static let ignoreRegexp = "ignoreRegexp"
 
     static var showInStatusBar: String {
       ProcessInfo.processInfo.arguments.contains("ui-testing") ? "showInStatusBarUITests" : "showInStatusBar"
@@ -38,15 +48,19 @@ extension UserDefaults {
   public struct Values {
     static let ignoredApps: [String] = []
     static let ignoredPasteboardTypes: [String] = []
+    static let ignoreRegexp: [String] = []
     static let imageMaxHeight = 40.0
     static let maxMenuItems = 0
+    static let maxMenuItemLength = 50
     static let migrations: [String: Bool] = [:]
     static let pinTo = "top"
     static let popupPosition = "cursor"
+    static let previewDelay = 1500
+    static let searchMode = "exact"
     static let showInStatusBar = true
     static let size = 200
     static let sortBy = "lastCopiedAt"
-    static let storage: [HistoryItemOld] = []
+    static let menuIcon = "maccy"
   }
 
   public var avoidTakingFocus: Bool {
@@ -59,17 +73,17 @@ extension UserDefaults {
     set { set(newValue, forKey: Keys.clearOnQuit) }
   }
 
+  public var clearSystemClipboard: Bool {
+    get { bool(forKey: Keys.clearSystemClipboard) }
+    set { set(newValue, forKey: Keys.clearSystemClipboard) }
+  }
+
   @objc dynamic public var enabledPasteboardTypes: Set<NSPasteboard.PasteboardType> {
     get {
       let types = array(forKey: Keys.enabledPasteboardTypes) as? [String] ?? []
       return Set(types.map({ NSPasteboard.PasteboardType($0) }))
     }
     set { set(Array(newValue.map({ $0.rawValue })), forKey: Keys.enabledPasteboardTypes) }
-  }
-
-  public var fuzzySearch: Bool {
-    get { ProcessInfo.processInfo.arguments.contains("ui-testing") ? false : bool(forKey: Keys.fuzzySearch) }
-    set { set(newValue, forKey: Keys.fuzzySearch) }
   }
 
   @objc dynamic public var hideFooter: Bool {
@@ -92,6 +106,16 @@ extension UserDefaults {
     set { set(newValue, forKey: Keys.ignoreEvents) }
   }
 
+  public var ignoreOnlyNextEvent: Bool {
+    get { bool(forKey: Keys.ignoreOnlyNextEvent) }
+    set { set(newValue, forKey: Keys.ignoreOnlyNextEvent) }
+  }
+
+  public var ignoreAllAppsExceptListed: Bool {
+    get { bool(forKey: Keys.ignoreAllAppsExceptListed) }
+    set { set(newValue, forKey: Keys.ignoreAllAppsExceptListed) }
+  }
+
   public var ignoredApps: [String] {
     get { array(forKey: Keys.ignoredApps) as? [String] ?? Values.ignoredApps }
     set { set(newValue, forKey: Keys.ignoredApps) }
@@ -102,9 +126,22 @@ extension UserDefaults {
     set { set(Array(newValue), forKey: Keys.ignoredPasteboardTypes) }
   }
 
+  public var ignoreRegexp: [String] {
+    get { array(forKey: Keys.ignoreRegexp) as? [String] ?? Values.ignoreRegexp }
+    set { set(newValue, forKey: Keys.ignoreRegexp) }
+  }
+
   @objc dynamic public var imageMaxHeight: Int {
     get { integer(forKey: Keys.imageMaxHeight) }
     set { set(newValue, forKey: Keys.imageMaxHeight) }
+  }
+
+  public var lastReviewRequestedAt: Date {
+    get {
+      let int = Int64(integer(forKey: Keys.lastReviewRequestedAt))
+      return Date(timeIntervalSince1970: TimeInterval(integerLiteral: int))
+    }
+    set { set(Int(newValue.timeIntervalSince1970), forKey: Keys.lastReviewRequestedAt) }
   }
 
   public var maxMenuItems: Int {
@@ -112,9 +149,24 @@ extension UserDefaults {
     set { set(newValue, forKey: Keys.maxMenuItems) }
   }
 
+  @objc dynamic public var maxMenuItemLength: Int {
+    get { integer(forKey: Keys.maxMenuItemLength) }
+    set { set(newValue, forKey: Keys.maxMenuItemLength) }
+  }
+
+  @objc dynamic public var menuIcon: String {
+    get { string(forKey: Keys.menuIcon) ?? Values.menuIcon }
+    set { set(newValue, forKey: Keys.menuIcon) }
+  }
+
   public var migrations: [String: Bool] {
     get { dictionary(forKey: Keys.migrations) as? [String: Bool] ?? Values.migrations }
     set { set(newValue, forKey: Keys.migrations) }
+  }
+
+  public var numberOfUsages: Int {
+    get { integer(forKey: Keys.numberOfUsages) }
+    set { set(newValue, forKey: Keys.numberOfUsages) }
   }
 
   @objc dynamic public var pasteByDefault: Bool {
@@ -137,6 +189,16 @@ extension UserDefaults {
     set { set(newValue, forKey: Keys.popupPosition) }
   }
 
+  public var popupScreen: Int {
+    get { integer(forKey: Keys.popupScreen) }
+    set { set(newValue, forKey: Keys.popupScreen) }
+  }
+
+  public var previewDelay: Int {
+    get { integer(forKey: Keys.previewDelay) }
+    set { set(newValue, forKey: Keys.previewDelay) }
+  }
+
   @objc dynamic public var removeFormattingByDefault: Bool {
     get { bool(forKey: Keys.removeFormattingByDefault) }
     set { set(newValue, forKey: Keys.removeFormattingByDefault) }
@@ -145,6 +207,11 @@ extension UserDefaults {
   public var saratovSeparator: Bool {
     get { bool(forKey: Keys.saratovSeparator) }
     set { set(newValue, forKey: Keys.saratovSeparator) }
+  }
+
+  public var searchMode: String {
+    get { string(forKey: Keys.searchMode) ?? Values.searchMode }
+    set { set(newValue, forKey: Keys.searchMode) }
   }
 
   @objc dynamic public var showInStatusBar: Bool {
@@ -167,22 +234,8 @@ extension UserDefaults {
     set { set(newValue, forKey: Keys.sortBy) }
   }
 
-  // swiftlint:disable force_try
-  public var storage: [HistoryItemOld] {
-    get {
-      if let storedArray = UserDefaults.standard.object(forKey: Keys.storage) as? Data {
-        return try! PropertyListDecoder().decode([HistoryItemOld].self, from: storedArray)
-      } else {
-        return Values.storage
-      }
-    }
-
-    set { set(try! PropertyListEncoder().encode(newValue), forKey: Keys.storage) }
-  }
-  // swiftlint:enable force_try
-
-  public var supressClearAlert: Bool {
-    get { bool(forKey: Keys.supressClearAlert) }
-    set { set(newValue, forKey: Keys.supressClearAlert) }
+  public var suppressClearAlert: Bool {
+    get { bool(forKey: Keys.suppressClearAlert) }
+    set { set(newValue, forKey: Keys.suppressClearAlert) }
   }
 }

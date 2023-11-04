@@ -34,16 +34,33 @@ class HistoryMenuItemTests: XCTestCase {
     let menuItem = historyMenuItem(title)
     XCTAssertEqual(menuItem.title, title)
     XCTAssertEqual(menuItem.value, title)
-    XCTAssertEqual(menuItem.toolTip, tooltip(title))
+    XCTAssertNil(menuItem.image)
+  }
+
+  func testRTF() {
+    let rtf = NSAttributedString(string: "foo").rtf(
+      from: NSRange(0...2),
+      documentAttributes: [:]
+    )
+    let menuItem = historyMenuItem(rtf, .rtf)
+    XCTAssertEqual(menuItem.title, "foo")
+    XCTAssertEqual(menuItem.value, "foo")
+    XCTAssertNil(menuItem.image)
+  }
+
+  func testHTML() {
+    let html = "<a href='#'>foo</a>".data(using: .utf8)
+    let menuItem = historyMenuItem(html, .html)
+    XCTAssertEqual(menuItem.title, "foo")
+    XCTAssertEqual(menuItem.value, "foo")
     XCTAssertNil(menuItem.image)
   }
 
   func testImage() {
-    let image = NSImage(named: "NSBluetoothTemplate")!
+    let image = NSImage(named: "StatusBarMenuImage")!
     let menuItem = historyMenuItem(image)
     XCTAssertEqual(menuItem.title, " ")
     XCTAssertEqual(menuItem.value, "")
-    XCTAssertEqual(menuItem.toolTip, tooltip(nil))
     XCTAssertNotNil(menuItem.image)
     XCTAssertEqual(menuItem.image!.size, image.size)
   }
@@ -60,7 +77,6 @@ class HistoryMenuItemTests: XCTestCase {
     let menuItem = historyMenuItem(url)
     XCTAssertEqual(menuItem.title, "file:///tmp/foo.bar")
     XCTAssertEqual(menuItem.value, "file:///tmp/foo.bar")
-    XCTAssertEqual(menuItem.toolTip, tooltip("file:///tmp/foo.bar"))
     XCTAssertNil(menuItem.image)
   }
 
@@ -69,7 +85,6 @@ class HistoryMenuItemTests: XCTestCase {
     let menuItem = historyMenuItem(url)
     XCTAssertEqual(menuItem.title, "file:///tmp/产品培训/产品培训.txt")
     XCTAssertEqual(menuItem.value, "file:///tmp/产品培训/产品培训.txt")
-    XCTAssertEqual(menuItem.toolTip, tooltip("file:///tmp/产品培训/产品培训.txt"))
     XCTAssertNil(menuItem.image)
   }
 
@@ -77,7 +92,6 @@ class HistoryMenuItemTests: XCTestCase {
     let menuItem = historyMenuItem(nil)
     XCTAssertEqual(menuItem.title, "")
     XCTAssertEqual(menuItem.value, "")
-    XCTAssertEqual(menuItem.toolTip, nil)
     XCTAssertNil(menuItem.image)
   }
 
@@ -105,12 +119,6 @@ class HistoryMenuItemTests: XCTestCase {
     XCTAssertNotEqual(menuItem.state, .on)
   }
 
-  func testTooltipLongerThanMax() {
-    let menuItem = historyMenuItem(String(repeating: "a", count: 5_001))
-    XCTAssertEqual(menuItem.toolTip,
-            tooltip("\(String(repeating: "a", count: 3_333))...\(String(repeating: "a", count: 1_667))"))
-  }
-
   func testHighlight() {
     let menuItem = historyMenuItem("foo bar baz")
     menuItem.highlight([4...6, 8...9])
@@ -122,24 +130,43 @@ class HistoryMenuItemTests: XCTestCase {
     XCTAssertEqual(menuItem.attributedTitle, nil)
   }
 
-  private func historyMenuItem(_ value: String?) -> HistoryMenuItem {
+  func testHighlightInvalidRange() {
+    let menuItem = historyMenuItem("")
+    menuItem.highlight([0...0])
+    XCTAssertEqual(menuItem.attributedTitle?.string, "")
+  }
+
+  private func historyMenuItem(_ value: String?, application: String? = "com.apple.finder") -> HistoryMenuItem {
     let content = HistoryItemContent(type: NSPasteboard.PasteboardType.string.rawValue,
                                      value: value?.data(using: .utf8))
     let item = HistoryItem(contents: [content])
+    item.application = application
     item.firstCopiedAt = firstCopiedAt
     item.lastCopiedAt = lastCopiedAt
     item.numberOfCopies = 2
-    return HistoryMenuItem(item: item, clipboard: Clipboard())
+    return HistoryMenuItem(item: item, clipboard: Clipboard.shared)
+  }
+
+  private func historyMenuItem(_ value: Data?, _ type: NSPasteboard.PasteboardType) -> HistoryMenuItem {
+    let content = HistoryItemContent(type: type.rawValue,
+                                     value: value)
+    let item = HistoryItem(contents: [content])
+    item.application = "com.apple.finder"
+    item.firstCopiedAt = firstCopiedAt
+    item.lastCopiedAt = lastCopiedAt
+    item.numberOfCopies = 2
+    return HistoryMenuItem(item: item, clipboard: Clipboard.shared)
   }
 
   private func historyMenuItem(_ value: NSImage) -> HistoryMenuItem {
     let content = HistoryItemContent(type: NSPasteboard.PasteboardType.tiff.rawValue,
                                      value: value.tiffRepresentation!)
     let item = HistoryItem(contents: [content])
+    item.application = "com.apple.finder"
     item.firstCopiedAt = firstCopiedAt
     item.lastCopiedAt = lastCopiedAt
     item.numberOfCopies = 2
-    return HistoryMenuItem(item: item, clipboard: Clipboard())
+    return HistoryMenuItem(item: item, clipboard: Clipboard.shared)
   }
 
   private func historyMenuItem(_ value: URL) -> HistoryMenuItem {
@@ -152,33 +179,10 @@ class HistoryMenuItemTests: XCTestCase {
       value: value.lastPathComponent.data(using: .utf8)
     )
     let item = HistoryItem(contents: [fileURLContent, fileNameContent])
+    item.application = "com.apple.finder"
     item.firstCopiedAt = firstCopiedAt
     item.lastCopiedAt = lastCopiedAt
     item.numberOfCopies = 2
-    return HistoryMenuItem(item: item, clipboard: Clipboard())
-  }
-
-  private func tooltip(_ title: String?) -> String {
-    if title == nil {
-      return """
-             First copy time: Jul 10, 12:31:34
-             Last copy time: Jul 10, 12:41:34
-             Number of copies: 2
-
-             Press ⌥⌫ to delete.
-             Press ⌥P to (un)pin.
-             """
-    } else {
-      return """
-             \(title!)
-
-             First copy time: Jul 10, 12:31:34
-             Last copy time: Jul 10, 12:41:34
-             Number of copies: 2
-
-             Press ⌥⌫ to delete.
-             Press ⌥P to (un)pin.
-             """
-    }
+    return HistoryMenuItem(item: item, clipboard: Clipboard.shared)
   }
 }

@@ -2,6 +2,13 @@ import AppKit
 import Fuse
 
 class Search {
+  enum Mode: String, CaseIterable {
+    case exact
+    case fuzzy
+    case regexp
+    case mixed
+  }
+
   struct SearchResult: Equatable {
     var score: Double?
     var object: Menu.IndexedItem
@@ -18,10 +25,15 @@ class Search {
       return within.map({ SearchResult(score: nil, object: $0, titleMatches: [])})
     }
 
-    if UserDefaults.standard.fuzzySearch {
+    switch Mode(rawValue: UserDefaults.standard.searchMode) {
+    case .mixed:
+      return mixedSearch(string: string, within: within)
+    case .regexp:
+      return simpleSearch(string: string, within: within, options: .regularExpression)
+    case .fuzzy:
       return fuzzySearch(string: string, within: within)
-    } else {
-      return simpleSearch(string: string, within: within)
+    default:
+      return simpleSearch(string: string, within: within, options: .caseInsensitive)
     }
   }
 
@@ -54,17 +66,22 @@ class Search {
     }
   }
 
-  private func simpleSearch(string: String, within: [Searchable]) -> [SearchResult] {
+  private func simpleSearch(string: String, within: [Searchable], options: NSString.CompareOptions) -> [SearchResult] {
     return within.compactMap({ item in
-      simpleSearch(for: string, in: item.title, of: item) ??
-        simpleSearch(for: string, in: item.value, of: item)
+      simpleSearch(for: string, in: item.title, of: item, options: options) ??
+        simpleSearch(for: string, in: item.value, of: item, options: options)
     })
   }
 
-  private func simpleSearch(for string: String, in searchString: String, of item: Searchable) -> SearchResult? {
+  private func simpleSearch(
+    for string: String,
+    in searchString: String,
+    of item: Searchable,
+    options: NSString.CompareOptions
+  ) -> SearchResult? {
     if searchString.range(
       of: string,
-      options: .caseInsensitive,
+      options: options,
       range: nil,
       locale: nil
     ) != nil {
@@ -75,9 +92,12 @@ class Search {
       )
 
       let title = item.title
-      if let titleRange = title.range(of: string, options: .caseInsensitive, range: nil, locale: nil) {
+      if let titleRange = title.range(of: string, options: options, range: nil, locale: nil) {
         let lowerBound = title.distance(from: title.startIndex, to: titleRange.lowerBound)
-        let upperBound = title.distance(from: title.startIndex, to: titleRange.upperBound) - 1
+        var upperBound = title.distance(from: title.startIndex, to: titleRange.upperBound)
+        if upperBound > lowerBound {
+          upperBound -= 1
+        }
         result.titleMatches.append(lowerBound...upperBound)
       }
 
@@ -85,5 +105,24 @@ class Search {
     } else {
       return nil
     }
+  }
+
+  private func mixedSearch(string: String, within: [Searchable]) -> [SearchResult] {
+    var results = simpleSearch(string: string, within: within, options: .caseInsensitive)
+    guard results.isEmpty else {
+      return results
+    }
+
+    results = simpleSearch(string: string, within: within, options: .regularExpression)
+    guard results.isEmpty else {
+      return results
+    }
+
+    results = fuzzySearch(string: string, within: within)
+    guard results.isEmpty else {
+      return results
+    }
+
+    return []
   }
 }
